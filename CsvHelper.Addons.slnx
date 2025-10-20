@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/CsvHelper.Excel/">
+    <Project Path="CsvHelper.Excel/CsvHelper.Excel.Specs/CsvHelper.Excel.Specs.csproj" />
+    <Project Path="CsvHelper.Excel/CsvHelper.Excel/CsvHelper.Excel.csproj" />
+  </Folder>
+  <Project Path="CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj" />
+</Solution>
