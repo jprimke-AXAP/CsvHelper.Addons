@@ -10,8 +10,4 @@
       <PackageReference Include="CsvHelper" />
     </ItemGroup>
 
-    <ItemGroup>
-      <ProjectReference Include="..\Encryption\Encryption.csproj" />
-    </ItemGroup>
-
 </Project>
