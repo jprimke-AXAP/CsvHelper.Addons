@@ -77,7 +77,7 @@ foreach (var row in csv.GetRecords<dynamic>())
 }
 ```
 
-Alternativ können Sie Attribute an Ihrem Datentyp verwenden. Siehe `src/CsvHelper.FixedLengthParser/README.de.md`.
+Alternativ können Sie Attribute an Ihrem Datentyp verwenden. Siehe `src/CsvHelper.FixedLengthParser`.
 
 ## Build & Tests
 
