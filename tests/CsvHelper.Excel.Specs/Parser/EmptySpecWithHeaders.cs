@@ -19,9 +19,9 @@ namespace CsvHelper.Excel.Specs.Parser;
 
 public abstract class EmptySpecWithHeaders : IDisposable
 {
-    protected readonly Person[] Values = new Person[0];
+    protected readonly Person[] Values = [];
 
-    protected Person[] Results;
+    protected Person[]? Results;
 
     protected string Path { get; }
 
@@ -97,16 +97,10 @@ public abstract class EmptySpecWithHeaders : IDisposable
     }
 
     [Fact]
-    public void TheResultsAreNotNull()
-    {
-        Results.Should().NotBeNull();
-    }
+    public void TheResultsAreNotNull() => Results.Should().NotBeNull();
 
     [Fact]
-    public void TheResultsAreCorrect()
-    {
-        Values.Should().BeEquivalentTo(Results, options => options.IncludingProperties());
-    }
+    public void TheResultsAreCorrect() => Values.Should().BeEquivalentTo(Results, options => options.IncludingProperties());
 
     public void Dispose()
     {

@@ -14,15 +14,15 @@ public static class Helpers
 {
     public static XLWorkbook GetOrCreateWorkbook(string path, string worksheetName)
     {
-        if (!File.Exists(path))
+        if (File.Exists(path))
         {
-            var workbook = new XLWorkbook();
-            workbook.GetOrAddWorksheet(worksheetName);
-            workbook.SaveAs(path);
-            return workbook;
+            return new XLWorkbook(path);
         }
 
-        return new XLWorkbook(path);
+        var workbook = new XLWorkbook();
+        workbook.GetOrAddWorksheet(worksheetName);
+        workbook.SaveAs(path);
+        return workbook;
     }
 
     public static IXLWorksheet GetOrAddWorksheet(this XLWorkbook workbook, string sheetName)

@@ -19,7 +19,6 @@
   <ItemGroup>
     <PackageReference Include="ClosedXML" />
     <PackageReference Include="CsvHelper" />
-    <PackageReference Include="Microsoft.DependencyValidation.Analyzers" />
   </ItemGroup>
 
   <PropertyGroup>
