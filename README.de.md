@@ -5,7 +5,7 @@
 
 Sprache: Deutsch | [English](README.md)
 
-Erweiterungen für [CsvHelper](https://joshclose.github.io/CsvHelper/) zur Verarbeitung von Excel-Dateien und festbreitenbasierten Textdateien.
+Erweiterungen für [CsvHelper](https://joshclose.github.io/CsvHelper/) zur Verarbeitung von Excel-Dateien und Festlängen-Dateien.
 
 Dieses Repository enthält zwei eigenständige Bibliotheken, die sich nahtlos in CsvHelper integrieren:
 
