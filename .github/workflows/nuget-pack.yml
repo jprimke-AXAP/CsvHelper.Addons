@@ -281,11 +281,14 @@ jobs:
           if ('${{ steps.detect.outputs.excelTouched }}' -eq 'true') { git add "src/CsvHelper.Excel/CsvHelper.Excel.csproj" }
           if ('${{ steps.detect.outputs.fixedTouched }}' -eq 'true') { git add "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj" }
           if (Test-Path "CHANGELOG.md") { git add CHANGELOG.md }
-          if (-not (git diff --cached --quiet)) {
+          # Only commit/push if there are staged changes
+          $staged = (git diff --cached --name-only) | Where-Object { $_ -ne $null }
+          if ($staged -and $staged.Count -gt 0) {
             git commit -m "chore: bump package versions and update changelog [skip ci]"
             git push
           } else {
             Write-Host "No changes to commit."
+            exit 0
           }
 
       - name: Restore
