@@ -1,0 +1,154 @@
+name: Build and publish packages
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'Directory.*.props'
+      - '**/*.csproj'
+      - '**/*.sln*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      excel: ${{ steps.filter.outputs.excel }}
+      fixed: ${{ steps.filter.outputs.fixed }}
+      shared: ${{ steps.filter.outputs.shared }}
+      any: ${{ steps.any.outputs.any }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            excel:
+              - 'src/CsvHelper.Excel/**'
+            fixed:
+              - 'src/CsvHelper.FixedLengthParser/**'
+            shared:
+              - 'Directory.*.props'
+              - '**/*.sln*'
+              - '**/*.csproj'
+
+      - name: Mark any changes
+        id: any
+        shell: bash
+        env:
+          EXCEL: ${{ steps.filter.outputs.excel }}
+          FIXED: ${{ steps.filter.outputs.fixed }}
+          SHARED: ${{ steps.filter.outputs.shared }}
+        run: |
+          if [ "$EXCEL" = "true" ] || [ "$FIXED" = "true" ] || [ "$SHARED" = "true" ]; then
+            echo "any=true" >> $GITHUB_OUTPUT
+          else
+            echo "any=false" >> $GITHUB_OUTPUT
+          fi
+
+  build-pack:
+    needs: changes
+    if: needs.changes.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Build and test Excel
+        if: needs.changes.outputs.excel == 'true' || needs.changes.outputs.shared == 'true'
+        run: |
+          dotnet restore src/CsvHelper.Excel/CsvHelper.Excel.csproj
+          dotnet build src/CsvHelper.Excel/CsvHelper.Excel.csproj -c Release --no-restore
+          dotnet test tests/CsvHelper.Excel.Specs/CsvHelper.Excel.Specs.csproj -c Release --logger trx
+
+      - name: Pack Excel
+        if: needs.changes.outputs.excel == 'true' || needs.changes.outputs.shared == 'true'
+        run: |
+          mkdir -p artifacts
+          dotnet pack src/CsvHelper.Excel/CsvHelper.Excel.csproj -c Release -o artifacts --no-build
+
+      - name: Build FixedLengthParser
+        if: needs.changes.outputs.fixed == 'true' || needs.changes.outputs.shared == 'true'
+        run: |
+          dotnet restore src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj
+          dotnet build src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj -c Release --no-restore
+
+      - name: Pack FixedLengthParser
+        if: needs.changes.outputs.fixed == 'true' || needs.changes.outputs.shared == 'true'
+        run: |
+          mkdir -p artifacts
+          dotnet pack src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj -c Release -o artifacts --no-build
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts/*.nupkg
+          if-no-files-found: ignore
+
+  publish:
+    needs: build-pack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts
+
+      - name: Check for packages
+        id: check
+        shell: bash
+        run: |
+          count=$(ls -1 artifacts/*.nupkg 2>/dev/null | wc -l)
+          if [ "$count" -gt "0" ]; then
+            echo "has_packages=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_packages=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup .NET
+        if: steps.check.outputs.has_packages == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Add GitHub Packages source
+        if: steps.check.outputs.has_packages == 'true'
+        run: |
+          dotnet nuget add source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+            --name github --username "${{ github.repository_owner }}" --password "${{ secrets.GITHUB_TOKEN }}" --store-password-in-clear-text
+
+      - name: Push packages to GitHub Packages
+        if: steps.check.outputs.has_packages == 'true'
+        run: |
+          dotnet nuget push "artifacts/*.nupkg" --source github --skip-duplicate --api-key "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Create GitHub Release and upload packages
+        if: steps.check.outputs.has_packages == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: packages-${{ github.run_number }}-${{ github.sha }}
+          name: Packages ${{ github.run_number }} (${{ github.sha }})
+          generate_release_notes: true
+          files: |
+            artifacts/*.nupkg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
