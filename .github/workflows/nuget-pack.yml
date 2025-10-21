@@ -36,7 +36,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          # Fetch full history so we can diff PR base/head and push before/after reliably
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -132,8 +133,9 @@ jobs:
           "excelTouched=$($excelTouched.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "fixedTouched=$($fixedTouched.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           if ($beforeSha) { "beforeSha=$beforeSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append }
-      - name: Generate release notes files (PR only)
-        if: ${{ github.event_name == 'pull_request' && (steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true') }}
+      - name: Generate release notes files
+        # Generate notes for either PRs (to preview) or pushes to main (for releases)
+        if: ${{ steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true' }}
         id: notes
         shell: pwsh
         run: |
@@ -226,8 +228,6 @@ jobs:
             }
           }
 
-          Write-Host "Excel touched: $excelTouched; version => $excelNew"
-          Write-Host "FixedLengthParser touched: $fixedTouched; version => $fixedNew"
 
       - name: Update Excel project version (PR only)
         if: ${{ github.event_name == 'pull_request' && steps.detect.outputs.excelTouched == 'true' }}
@@ -302,7 +302,8 @@ jobs:
           }
 
       - name: Commit changes back to PR branch
-        if: ${{ github.event_name == 'pull_request' && (steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true') }}
+        # Only attempt to push back when PR originates from the same repository (not from a fork)
+        if: ${{ github.event_name == 'pull_request' && (steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true') && github.event.pull_request.head.repo.fork == false }}
         shell: pwsh
         env:
           GIT_AUTHOR_NAME: github-actions
@@ -316,6 +317,8 @@ jobs:
           if ('${{ steps.detect.outputs.excelTouched }}' -eq 'true') { git add "src/CsvHelper.Excel/CsvHelper.Excel.csproj" }
           if ('${{ steps.detect.outputs.fixedTouched }}' -eq 'true') { git add "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj" }
           if (Test-Path "CHANGELOG.md") { git add CHANGELOG.md }
+          if (Test-Path "release-notes-excel.md") { git add release-notes-excel.md }
+          if (Test-Path "release-notes-fixed.md") { git add release-notes-fixed.md }
           $staged = (git diff --cached --name-only) | Where-Object { $_ -ne $null }
           if ($staged -and $staged.Count -gt 0) {
             git commit -m "chore: bump package versions and update changelog [skip ci]"
@@ -324,12 +327,24 @@ jobs:
             Write-Host "No changes to commit."
           }
 
+      - name: Note about forked PRs (PR only)
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true && (steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true') }}
+        shell: pwsh
+        run: |
+          Write-Warning "This PR originates from a fork. Version/changelog changes were computed but cannot be pushed back automatically. Please apply them manually if desired."
+
       - name: Restore (main only)
         if: ${{ github.event_name == 'push' }}
         shell: pwsh
         run: |
           dotnet restore "src/CsvHelper.Excel/CsvHelper.Excel.csproj"
           dotnet restore "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj"
+
+      - name: Test (main only)
+        if: ${{ github.event_name == 'push' }}
+        shell: pwsh
+        run: |
+          dotnet test "tests/CsvHelper.Excel.Specs/CsvHelper.Excel.Specs.csproj" --configuration Release --no-restore --verbosity minimal
 
       - name: Build CsvHelper.Excel (main only)
         if: github.event_name == 'push' && steps.detect.outputs.excelTouched == 'true'
