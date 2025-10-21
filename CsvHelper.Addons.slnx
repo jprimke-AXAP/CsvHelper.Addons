@@ -1,7 +1,16 @@
 <Solution>
-  <Folder Name="/CsvHelper.Excel/">
-    <Project Path="CsvHelper.Excel/CsvHelper.Excel.Specs/CsvHelper.Excel.Specs.csproj" />
-    <Project Path="CsvHelper.Excel/CsvHelper.Excel/CsvHelper.Excel.csproj" />
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+    <File Path=".gitattributes" />
+    <File Path=".gitignore" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
   </Folder>
-  <Project Path="CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj" />
+  <Folder Name="/src/">
+    <Project Path="src/CsvHelper.Excel/CsvHelper.Excel.csproj" />
+    <Project Path="src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CsvHelper.Excel.Specs/CsvHelper.Excel.Specs.csproj" />
+  </Folder>
 </Solution>

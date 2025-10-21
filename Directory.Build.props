@@ -1,0 +1,15 @@
+<Project>
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <AnalysisLevel>preview</AnalysisLevel>
+        <ImplicitUsings>enable</ImplicitUsings>
+
+        <Authors>Joerg Primke</Authors>
+        <Company>AXA Partners Germany</Company>
+        <Copyright>© by Joerg Primke</Copyright>
+    </PropertyGroup>
+
+</Project>
