@@ -10,6 +10,14 @@ on:
       - 'Directory.Packages.props'
       - 'Directory.Build.props'
       - '.github/workflows/nuget-pack.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/CsvHelper.Excel/**'
+      - 'src/CsvHelper.FixedLengthParser/**'
+      - 'Directory.Packages.props'
+      - 'Directory.Build.props'
+      - '.github/workflows/nuget-pack.yml'
   workflow_dispatch:
 
 jobs:
@@ -28,7 +36,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          # Fetch full history so we can diff PR base/head and push before/after reliably
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -54,12 +63,19 @@ jobs:
           $excelPath = "src/CsvHelper.Excel/CsvHelper.Excel.csproj"
           $fixedPath = "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj"
 
-          # Determine previous commit (before) from event payload
+          # Determine diff range based on event payload
           $beforeSha = $null
+          $baseSha = $null
+          $headSha = $null
           try {
             if (Test-Path $env:GITHUB_EVENT_PATH) {
               $event = Get-Content $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
-              $beforeSha = $event.before
+              if ($env:GITHUB_EVENT_NAME -eq 'push') {
+                $beforeSha = $event.before
+              } elseif ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
+                $baseSha = $event.pull_request.base.sha
+                $headSha = $event.pull_request.head.sha
+              }
             }
           } catch { }
 
@@ -80,6 +96,8 @@ jobs:
           try {
             if ($beforeSha) {
               $changed = git diff --name-only "$beforeSha" HEAD 2>$null
+            } elseif ($baseSha -and $headSha) {
+              $changed = git diff --name-only "$baseSha" "$headSha" 2>$null
             }
           } catch { }
 
@@ -116,12 +134,20 @@ jobs:
           "fixedTouched=$($fixedTouched.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           if ($beforeSha) { "beforeSha=$beforeSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append }
       - name: Generate release notes files
+        # Generate notes for either PRs (to preview) or pushes to main (for releases)
         if: ${{ steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true' }}
         id: notes
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $before = '${{ steps.detect.outputs.beforeSha }}'
+          $before = ''
+          try {
+            if (Test-Path $env:GITHUB_EVENT_PATH) {
+              $event = Get-Content $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
+              if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { $before = $event.pull_request.base.sha }
+              elseif ($env:GITHUB_EVENT_NAME -eq 'push') { $before = '${{ steps.detect.outputs.beforeSha }}' }
+            }
+          } catch { }
           function Build-Notes($path, $title) {
             $commits = @()
             if ($before) {
@@ -167,8 +193,8 @@ jobs:
           if ('${{ steps.detect.outputs.fixedTouched }}' -eq 'true') {
             Build-Notes 'src/CsvHelper.FixedLengthParser' "CsvHelper.FixedLengthParser v${{ steps.detect.outputs.fixedNewVersion }}" | Out-File -FilePath release-notes-fixed.md -Encoding utf8
           }
-      - name: Update CHANGELOG.md
-        if: ${{ steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true' }}
+      - name: Update CHANGELOG.md (PR only)
+        if: ${{ github.event_name == 'pull_request' && (steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true') }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -177,7 +203,14 @@ jobs:
             "# Changelog`n" | Out-File -FilePath $changelog -Encoding utf8
           }
           $date = Get-Date -Format 'yyyy-MM-dd'
-          $before = '${{ steps.detect.outputs.beforeSha }}'
+          $before = ''
+          try {
+            if (Test-Path $env:GITHUB_EVENT_PATH) {
+              $event = Get-Content $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
+              if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { $before = $event.pull_request.base.sha }
+              elseif ($env:GITHUB_EVENT_NAME -eq 'push') { $before = '${{ steps.detect.outputs.beforeSha }}' }
+            }
+          } catch { }
           if ('${{ steps.detect.outputs.excelTouched }}' -eq 'true') {
             "`n## CsvHelper.Excel v${{ steps.detect.outputs.excelNewVersion }} - $date`n" | Out-File -Append -FilePath $changelog -Encoding utf8
             if ($before) {
@@ -195,11 +228,9 @@ jobs:
             }
           }
 
-          Write-Host "Excel touched: $excelTouched; version => $excelNew"
-          Write-Host "FixedLengthParser touched: $fixedTouched; version => $fixedNew"
 
-      - name: Update Excel project version
-        if: steps.detect.outputs.excelTouched == 'true'
+      - name: Update Excel project version (PR only)
+        if: ${{ github.event_name == 'pull_request' && steps.detect.outputs.excelTouched == 'true' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -226,8 +257,8 @@ jobs:
           $verNode.InnerText = "${{ steps.detect.outputs.excelNewVersion }}"
           $excelXml.Save($excelPath)
 
-      - name: Update FixedLengthParser project version
-        if: steps.detect.outputs.fixedTouched == 'true'
+      - name: Update FixedLengthParser project version (PR only)
+        if: ${{ github.event_name == 'pull_request' && steps.detect.outputs.fixedTouched == 'true' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -253,8 +284,8 @@ jobs:
           $fixedVerNode.InnerText = "${{ steps.detect.outputs.fixedNewVersion }}"
           $fixedXml.Save($fixedPath)
 
-      - name: Update CHANGELOG.md
-        if: ${{ steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true' }}
+      - name: Update CHANGELOG.md (assemble from notes) (PR only)
+        if: ${{ github.event_name == 'pull_request' && (steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true') }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -270,10 +301,15 @@ jobs:
             Get-Content -Raw release-notes-fixed.md | Out-File -Append -FilePath $changelog -Encoding utf8
           }
 
-      - name: Commit version bump + changelog [skip ci]
+      - name: Commit changes back to PR branch
+        # Only attempt to push back when PR originates from the same repository (not from a fork)
+        if: ${{ github.event_name == 'pull_request' && (steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true') && github.event.pull_request.head.repo.fork == false }}
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_AUTHOR_NAME: github-actions
+          GIT_AUTHOR_EMAIL: github-actions@github.com
+          GIT_COMMITTER_NAME: github-actions
+          GIT_COMMITTER_EMAIL: github-actions@github.com
         run: |
           $ErrorActionPreference = 'Stop'
           git config user.name "github-actions"
@@ -281,60 +317,75 @@ jobs:
           if ('${{ steps.detect.outputs.excelTouched }}' -eq 'true') { git add "src/CsvHelper.Excel/CsvHelper.Excel.csproj" }
           if ('${{ steps.detect.outputs.fixedTouched }}' -eq 'true') { git add "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj" }
           if (Test-Path "CHANGELOG.md") { git add CHANGELOG.md }
-          # Only commit/push if there are staged changes
+          if (Test-Path "release-notes-excel.md") { git add release-notes-excel.md }
+          if (Test-Path "release-notes-fixed.md") { git add release-notes-fixed.md }
           $staged = (git diff --cached --name-only) | Where-Object { $_ -ne $null }
           if ($staged -and $staged.Count -gt 0) {
             git commit -m "chore: bump package versions and update changelog [skip ci]"
-            git push
+            git push origin HEAD:${{ github.head_ref }}
           } else {
             Write-Host "No changes to commit."
-            exit 0
           }
 
-      - name: Restore
+      - name: Note about forked PRs (PR only)
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true && (steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true') }}
+        shell: pwsh
+        run: |
+          Write-Warning "This PR originates from a fork. Version/changelog changes were computed but cannot be pushed back automatically. Please apply them manually if desired."
+
+      - name: Restore (main only)
+        if: ${{ github.event_name == 'push' }}
         shell: pwsh
         run: |
           dotnet restore "src/CsvHelper.Excel/CsvHelper.Excel.csproj"
           dotnet restore "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj"
 
-      - name: Build CsvHelper.Excel
-        if: steps.detect.outputs.excelTouched == 'true'
+      - name: Test (main only)
+        if: ${{ github.event_name == 'push' }}
+        shell: pwsh
+        run: |
+          dotnet test "tests/CsvHelper.Excel.Specs/CsvHelper.Excel.Specs.csproj" --configuration Release --no-restore --verbosity minimal
+
+      - name: Build CsvHelper.Excel (main only)
+        if: github.event_name == 'push' && steps.detect.outputs.excelTouched == 'true'
         shell: pwsh
         run: |
           dotnet build "src/CsvHelper.Excel/CsvHelper.Excel.csproj" --configuration Release --no-restore
 
-      - name: Build CsvHelper.FixedLengthParser
-        if: steps.detect.outputs.fixedTouched == 'true'
+      - name: Build CsvHelper.FixedLengthParser (main only)
+        if: github.event_name == 'push' && steps.detect.outputs.fixedTouched == 'true'
         shell: pwsh
         run: |
           dotnet build "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj" --configuration Release --no-restore
 
-      - name: Prepare output directory
+      - name: Prepare output directory (main only)
+        if: ${{ github.event_name == 'push' }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path "$env:GITHUB_WORKSPACE/nupkgs" -Force | Out-Null
 
-      - name: Pack CsvHelper.Excel
-        if: steps.detect.outputs.excelTouched == 'true'
+      - name: Pack CsvHelper.Excel (main only)
+        if: github.event_name == 'push' && steps.detect.outputs.excelTouched == 'true'
         shell: pwsh
         run: |
           dotnet pack "src/CsvHelper.Excel/CsvHelper.Excel.csproj" --configuration Release --no-build -o "$env:GITHUB_WORKSPACE/nupkgs" -p:PackageVersion=${{ steps.detect.outputs.excelNewVersion }} -p:Version=${{ steps.detect.outputs.excelNewVersion }}
 
-      - name: Pack CsvHelper.FixedLengthParser
-        if: steps.detect.outputs.fixedTouched == 'true'
+      - name: Pack CsvHelper.FixedLengthParser (main only)
+        if: github.event_name == 'push' && steps.detect.outputs.fixedTouched == 'true'
         shell: pwsh
         run: |
           dotnet pack "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj" --configuration Release --no-build -o "$env:GITHUB_WORKSPACE/nupkgs" -p:PackageVersion=${{ steps.detect.outputs.fixedNewVersion }} -p:Version=${{ steps.detect.outputs.fixedNewVersion }}
 
-      - name: List packages
+      - name: List packages (main only)
+        if: ${{ github.event_name == 'push' }}
         shell: pwsh
         run: |
           if (Test-Path "$env:GITHUB_WORKSPACE/nupkgs") {
             Get-ChildItem "$env:GITHUB_WORKSPACE/nupkgs" -Filter *.nupkg -Recurse | ForEach-Object { Write-Host $_.FullName }
           }
 
-      - name: Upload packages artifact
-        if: ${{ hashFiles('nupkgs/*.nupkg') != '' }}
+      - name: Upload packages artifact (main only)
+        if: ${{ github.event_name == 'push' && hashFiles('nupkgs/*.nupkg') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: nuget-packages
@@ -342,8 +393,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Publish packages to GitHub Packages
-        if: ${{ hashFiles('nupkgs/*.nupkg') != '' }}
+      - name: Publish packages to GitHub Packages (main only)
+        if: ${{ github.event_name == 'push' && hashFiles('nupkgs/*.nupkg') != '' }}
         shell: pwsh
         env:
           GH_OWNER: ${{ github.repository_owner }}
@@ -355,13 +406,14 @@ jobs:
           dotnet nuget add source $sourceUrl --name github --username $env:GH_OWNER --password $env:NUGET_AUTH_TOKEN --store-password-in-clear-text
           dotnet nuget push "nupkgs/*.nupkg" --source github --skip-duplicate
 
-      - name: Fetch tags
+      - name: Fetch tags (main only)
+        if: ${{ github.event_name == 'push' }}
         shell: pwsh
         run: |
           git fetch --tags --force --prune
 
-      - name: Create and push tag for Excel
-        if: ${{ steps.detect.outputs.excelTouched == 'true' }}
+      - name: Create and push tag for Excel (main only)
+        if: ${{ github.event_name == 'push' && steps.detect.outputs.excelTouched == 'true' }}
         shell: pwsh
         run: |
           $tag = "CsvHelper.Excel/v${{ steps.detect.outputs.excelNewVersion }}"
@@ -372,8 +424,8 @@ jobs:
             Write-Host "Tag $tag already exists. Skipping."
           }
 
-      - name: Create and push tag for FixedLengthParser
-        if: ${{ steps.detect.outputs.fixedTouched == 'true' }}
+      - name: Create and push tag for FixedLengthParser (main only)
+        if: ${{ github.event_name == 'push' && steps.detect.outputs.fixedTouched == 'true' }}
         shell: pwsh
         run: |
           $tag = "CsvHelper.FixedLengthParser/v${{ steps.detect.outputs.fixedNewVersion }}"
@@ -384,8 +436,8 @@ jobs:
             Write-Host "Tag $tag already exists. Skipping."
           }
 
-      - name: Create GitHub Release for Excel
-        if: ${{ steps.detect.outputs.excelTouched == 'true' }}
+      - name: Create GitHub Release for Excel (main only)
+        if: ${{ github.event_name == 'push' && steps.detect.outputs.excelTouched == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: CsvHelper.Excel/v${{ steps.detect.outputs.excelNewVersion }}
@@ -394,8 +446,8 @@ jobs:
           files: |
             nupkgs/CsvHelper.Excel.Core.${{ steps.detect.outputs.excelNewVersion }}.nupkg
 
-      - name: Create GitHub Release for FixedLengthParser
-        if: ${{ steps.detect.outputs.fixedTouched == 'true' }}
+      - name: Create GitHub Release for FixedLengthParser (main only)
+        if: ${{ github.event_name == 'push' && steps.detect.outputs.fixedTouched == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: CsvHelper.FixedLengthParser/v${{ steps.detect.outputs.fixedNewVersion }}
