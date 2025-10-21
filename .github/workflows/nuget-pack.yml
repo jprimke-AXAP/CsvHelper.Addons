@@ -1,0 +1,381 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Pack NuGet on version bump
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/CsvHelper.Excel/**'
+      - 'src/CsvHelper.FixedLengthParser/**'
+      - 'Directory.Packages.props'
+      - 'Directory.Build.props'
+      - '.github/workflows/nuget-pack.yml'
+  workflow_dispatch:
+
+jobs:
+  pack:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      actions: write
+      packages: write
+    concurrency:
+      group: pack-main
+      cancel-in-progress: true
+    # Avoid running again if a bot ever commits something in follow-ups
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Compute next patch versions
+        id: detect
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          function Get-XmlValue($xmlContent, $xpath) {
+            try {
+              $xml = [xml]$xmlContent
+              $node = $xml.SelectSingleNode($xpath)
+              return $node.InnerText
+            } catch {
+              return $null
+            }
+          }
+
+          $excelPath = "src/CsvHelper.Excel/CsvHelper.Excel.csproj"
+          $fixedPath = "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj"
+
+          # Determine previous commit (before) from event payload
+          $beforeSha = $null
+          try {
+            if (Test-Path $env:GITHUB_EVENT_PATH) {
+              $event = Get-Content $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
+              $beforeSha = $event.before
+            }
+          } catch { }
+
+          $excelCurrent = Get-Content $excelPath -Raw
+          $excelVersion = Get-XmlValue $excelCurrent "//Project/PropertyGroup/VersionPrefix"
+          if (-not $excelVersion) { $excelVersion = Get-XmlValue $excelCurrent "//Project/PropertyGroup/Version" }
+          if (-not $excelVersion) { $excelVersion = '1.0.0' }
+
+          $fixedCurrent = Get-Content $fixedPath -Raw
+          $fixedVersion = Get-XmlValue $fixedCurrent "//Project/PropertyGroup/FileVersion"
+          if (-not $fixedVersion) { $fixedVersion = Get-XmlValue $fixedCurrent "//Project/PropertyGroup/AssemblyVersion" }
+          if (-not $fixedVersion) { $fixedVersion = '1.0.0' }
+
+          # Determine what changed in this push
+          $excelTouched = $false
+          $fixedTouched = $false
+          $changed = @()
+          try {
+            if ($beforeSha) {
+              $changed = git diff --name-only "$beforeSha" HEAD 2>$null
+            }
+          } catch { }
+
+          if ($changed) {
+            if ($changed | Where-Object { $_ -like 'src/CsvHelper.Excel/*' }) { $excelTouched = $true }
+            if ($changed | Where-Object { $_ -like 'src/CsvHelper.FixedLengthParser/*' }) { $fixedTouched = $true }
+            if ($changed | Where-Object { $_ -like 'Directory.Packages.props' -or $_ -like 'Directory.Build.props' }) {
+              # Treat central config changes as affecting both packages
+              $excelTouched = $true; $fixedTouched = $true
+            }
+          }
+
+          function Bump-Patch($semver) {
+            # Accepts x, x.y, or x.y.z; returns x.y.(z+1)
+            $parts = $semver -split '\.'
+            if ($parts.Count -lt 3) {
+              $parts = @(
+                if ($parts.Count -ge 1) { $parts[0] } else { '1' },
+                if ($parts.Count -ge 2) { $parts[1] } else { '0' },
+                '0'
+              )
+            }
+            $major = [int]$parts[0]
+            $minor = [int]$parts[1]
+            $patch = [int]$parts[2]
+            return "$major.$minor.$($patch + 1)"
+          }
+
+          # Excel new version based on VersionPrefix/Version
+          $excelNew = if ($excelTouched) { Bump-Patch $excelVersion } else { $excelVersion }
+
+          # Fixed new version based on 3-part normalization of File/AssemblyVersion
+          $fixedParts = $fixedVersion -split '\.'
+          if ($fixedParts.Count -ge 3) { $fixed3 = ($fixedParts[0..2] -join '.') } else { $fixed3 = $fixedVersion }
+          $fixedNew = if ($fixedTouched) { Bump-Patch $fixed3 } else { $fixed3 }
+
+          "excelNewVersion=$excelNew" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "fixedNewVersion=$fixedNew" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "excelTouched=$($excelTouched.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "fixedTouched=$($fixedTouched.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          if ($beforeSha) { "beforeSha=$beforeSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append }
+      - name: Generate release notes files
+        if: ${{ steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true' }}
+        id: notes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $before = '${{ steps.detect.outputs.beforeSha }}'
+          function Build-Notes($path, $title) {
+            $commits = @()
+            if ($before) {
+              $commits = git log --pretty='%s' "$before..HEAD" -- $path
+            } else {
+              $commits = git log -n 50 --pretty='%s' -- $path
+            }
+            $sections = [ordered]@{
+              'Features' = @()
+              'Fixes' = @()
+              'Performance' = @()
+              'Docs' = @()
+              'Refactor' = @()
+              'Tests' = @()
+              'Build' = @()
+              'CI' = @()
+              'Chore' = @()
+              'Other' = @()
+            }
+            foreach ($msg in $commits) {
+              if ($msg -match '^(feat)(\(.+\))?:\s*(.+)') { $sections['Features'] += "- $($Matches[3])"; continue }
+              if ($msg -match '^(fix)(\(.+\))?:\s*(.+)') { $sections['Fixes'] += "- $($Matches[3])"; continue }
+              if ($msg -match '^(perf)(\(.+\))?:\s*(.+)') { $sections['Performance'] += "- $($Matches[3])"; continue }
+              if ($msg -match '^(docs)(\(.+\))?:\s*(.+)') { $sections['Docs'] += "- $($Matches[3])"; continue }
+              if ($msg -match '^(refactor)(\(.+\))?:\s*(.+)') { $sections['Refactor'] += "- $($Matches[3])"; continue }
+              if ($msg -match '^(test)(\(.+\))?:\s*(.+)') { $sections['Tests'] += "- $($Matches[3])"; continue }
+              if ($msg -match '^(build)(\(.+\))?:\s*(.+)') { $sections['Build'] += "- $($Matches[3])"; continue }
+              if ($msg -match '^(ci)(\(.+\))?:\s*(.+)') { $sections['CI'] += "- $($Matches[3])"; continue }
+              if ($msg -match '^(chore)(\(.+\))?:\s*(.+)') { $sections['Chore'] += "- $($Matches[3])"; continue }
+              $sections['Other'] += "- $msg"
+            }
+            $out = "# $title`n`n"
+            foreach ($k in $sections.Keys) {
+              if ($sections[$k].Count -gt 0) {
+                $out += "## $k`n" + ($sections[$k] -join "`n") + "`n`n"
+              }
+            }
+            return $out.TrimEnd()
+          }
+          if ('${{ steps.detect.outputs.excelTouched }}' -eq 'true') {
+            Build-Notes 'src/CsvHelper.Excel' "CsvHelper.Excel v${{ steps.detect.outputs.excelNewVersion }}" | Out-File -FilePath release-notes-excel.md -Encoding utf8
+          }
+          if ('${{ steps.detect.outputs.fixedTouched }}' -eq 'true') {
+            Build-Notes 'src/CsvHelper.FixedLengthParser' "CsvHelper.FixedLengthParser v${{ steps.detect.outputs.fixedNewVersion }}" | Out-File -FilePath release-notes-fixed.md -Encoding utf8
+          }
+      - name: Update CHANGELOG.md
+        if: ${{ steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $changelog = "CHANGELOG.md"
+          if (-not (Test-Path $changelog)) {
+            "# Changelog`n" | Out-File -FilePath $changelog -Encoding utf8
+          }
+          $date = Get-Date -Format 'yyyy-MM-dd'
+          $before = '${{ steps.detect.outputs.beforeSha }}'
+          if ('${{ steps.detect.outputs.excelTouched }}' -eq 'true') {
+            "`n## CsvHelper.Excel v${{ steps.detect.outputs.excelNewVersion }} - $date`n" | Out-File -Append -FilePath $changelog -Encoding utf8
+            if ($before) {
+              git log --pretty="- %s (%h)" "$before..HEAD" -- "src/CsvHelper.Excel" | Out-File -Append -FilePath $changelog -Encoding utf8
+            } else {
+              "- Changes included in this release." | Out-File -Append -FilePath $changelog -Encoding utf8
+            }
+          }
+          if ('${{ steps.detect.outputs.fixedTouched }}' -eq 'true') {
+            "`n## CsvHelper.FixedLengthParser v${{ steps.detect.outputs.fixedNewVersion }} - $date`n" | Out-File -Append -FilePath $changelog -Encoding utf8
+            if ($before) {
+              git log --pretty="- %s (%h)" "$before..HEAD" -- "src/CsvHelper.FixedLengthParser" | Out-File -Append -FilePath $changelog -Encoding utf8
+            } else {
+              "- Changes included in this release." | Out-File -Append -FilePath $changelog -Encoding utf8
+            }
+          }
+
+          Write-Host "Excel touched: $excelTouched; version => $excelNew"
+          Write-Host "FixedLengthParser touched: $fixedTouched; version => $fixedNew"
+
+      - name: Update Excel project version
+        if: steps.detect.outputs.excelTouched == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $excelPath = "src/CsvHelper.Excel/CsvHelper.Excel.csproj"
+          $excelXml = [xml](Get-Content $excelPath -Raw)
+          $pg = $excelXml.Project.PropertyGroup | Select-Object -First 1
+          if (-not $pg) { $pg = $excelXml.CreateElement('PropertyGroup'); [void]$excelXml.Project.AppendChild($pg) }
+          $verNode = $pg.VersionPrefix; if (-not $verNode) { $verNode = $pg.Version }
+          if (-not $verNode) { $verNode = $excelXml.CreateElement('VersionPrefix'); [void]$pg.AppendChild($verNode) }
+          $verNode.InnerText = "${{ steps.detect.outputs.excelNewVersion }}"
+          $excelXml.Save($excelPath)
+
+      - name: Update FixedLengthParser project version
+        if: steps.detect.outputs.fixedTouched == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $fixedPath = "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj"
+          $fixedXml = [xml](Get-Content $fixedPath -Raw)
+          $pg2 = $fixedXml.Project.PropertyGroup | Select-Object -First 1
+          if (-not $pg2) { $pg2 = $fixedXml.CreateElement('PropertyGroup'); [void]$fixedXml.Project.AppendChild($pg2) }
+          $fixedVerNode = $pg2.Version
+          if (-not $fixedVerNode) { $fixedVerNode = $fixedXml.CreateElement('Version'); [void]$pg2.AppendChild($fixedVerNode) }
+          $fixedVerNode.InnerText = "${{ steps.detect.outputs.fixedNewVersion }}"
+          $fixedXml.Save($fixedPath)
+
+      - name: Update CHANGELOG.md
+        if: ${{ steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $changelog = "CHANGELOG.md"
+          if (-not (Test-Path $changelog)) { "# Changelog`n" | Out-File -FilePath $changelog -Encoding utf8 }
+          $date = Get-Date -Format 'yyyy-MM-dd'
+          if ('${{ steps.detect.outputs.excelTouched }}' -eq 'true') {
+            "`n## CsvHelper.Excel v${{ steps.detect.outputs.excelNewVersion }} - $date`n" | Out-File -Append -FilePath $changelog -Encoding utf8
+            Get-Content -Raw release-notes-excel.md | Out-File -Append -FilePath $changelog -Encoding utf8
+          }
+          if ('${{ steps.detect.outputs.fixedTouched }}' -eq 'true') {
+            "`n## CsvHelper.FixedLengthParser v${{ steps.detect.outputs.fixedNewVersion }} - $date`n" | Out-File -Append -FilePath $changelog -Encoding utf8
+            Get-Content -Raw release-notes-fixed.md | Out-File -Append -FilePath $changelog -Encoding utf8
+          }
+
+      - name: Commit version bump + changelog [skip ci]
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          if ('${{ steps.detect.outputs.excelTouched }}' -eq 'true') { git add "src/CsvHelper.Excel/CsvHelper.Excel.csproj" }
+          if ('${{ steps.detect.outputs.fixedTouched }}' -eq 'true') { git add "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj" }
+          if (Test-Path "CHANGELOG.md") { git add CHANGELOG.md }
+          if (-not (git diff --cached --quiet)) {
+            git commit -m "chore: bump package versions and update changelog [skip ci]"
+            git push
+          } else {
+            Write-Host "No changes to commit."
+          }
+
+      - name: Restore
+        shell: pwsh
+        run: |
+          dotnet restore "src/CsvHelper.Excel/CsvHelper.Excel.csproj"
+          dotnet restore "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj"
+
+      - name: Build CsvHelper.Excel
+        if: steps.detect.outputs.excelTouched == 'true'
+        shell: pwsh
+        run: |
+          dotnet build "src/CsvHelper.Excel/CsvHelper.Excel.csproj" --configuration Release --no-restore
+
+      - name: Build CsvHelper.FixedLengthParser
+        if: steps.detect.outputs.fixedTouched == 'true'
+        shell: pwsh
+        run: |
+          dotnet build "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj" --configuration Release --no-restore
+
+      - name: Prepare output directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "$env:GITHUB_WORKSPACE/nupkgs" -Force | Out-Null
+
+      - name: Pack CsvHelper.Excel
+        if: steps.detect.outputs.excelTouched == 'true'
+        shell: pwsh
+        run: |
+          dotnet pack "src/CsvHelper.Excel/CsvHelper.Excel.csproj" --configuration Release --no-build -o "$env:GITHUB_WORKSPACE/nupkgs" -p:PackageVersion=${{ steps.detect.outputs.excelNewVersion }} -p:Version=${{ steps.detect.outputs.excelNewVersion }}
+
+      - name: Pack CsvHelper.FixedLengthParser
+        if: steps.detect.outputs.fixedTouched == 'true'
+        shell: pwsh
+        run: |
+          dotnet pack "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj" --configuration Release --no-build -o "$env:GITHUB_WORKSPACE/nupkgs" -p:PackageVersion=${{ steps.detect.outputs.fixedNewVersion }} -p:Version=${{ steps.detect.outputs.fixedNewVersion }}
+
+      - name: List packages
+        shell: pwsh
+        run: |
+          if (Test-Path "$env:GITHUB_WORKSPACE/nupkgs") {
+            Get-ChildItem "$env:GITHUB_WORKSPACE/nupkgs" -Filter *.nupkg -Recurse | ForEach-Object { Write-Host $_.FullName }
+          }
+
+      - name: Upload packages artifact
+        if: ${{ hashFiles('nupkgs/*.nupkg') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: nupkgs/*.nupkg
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish packages to GitHub Packages
+        if: ${{ hashFiles('nupkgs/*.nupkg') != '' }}
+        shell: pwsh
+        env:
+          GH_OWNER: ${{ github.repository_owner }}
+          NUGET_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sourceUrl = "https://nuget.pkg.github.com/$env:GH_OWNER/index.json"
+          dotnet nuget remove source github 2>$null | Out-Null
+          dotnet nuget add source $sourceUrl --name github --username $env:GH_OWNER --password $env:NUGET_AUTH_TOKEN --store-password-in-clear-text
+          dotnet nuget push "nupkgs/*.nupkg" --source github --skip-duplicate
+
+      - name: Fetch tags
+        shell: pwsh
+        run: |
+          git fetch --tags --force --prune
+
+      - name: Create and push tag for Excel
+        if: ${{ steps.detect.outputs.excelTouched == 'true' }}
+        shell: pwsh
+        run: |
+          $tag = "CsvHelper.Excel/v${{ steps.detect.outputs.excelNewVersion }}"
+          if (-not (git rev-parse -q --verify "$tag")) {
+            git tag -a $tag -m "Release $tag"
+            git push origin $tag
+          } else {
+            Write-Host "Tag $tag already exists. Skipping."
+          }
+
+      - name: Create and push tag for FixedLengthParser
+        if: ${{ steps.detect.outputs.fixedTouched == 'true' }}
+        shell: pwsh
+        run: |
+          $tag = "CsvHelper.FixedLengthParser/v${{ steps.detect.outputs.fixedNewVersion }}"
+          if (-not (git rev-parse -q --verify "$tag")) {
+            git tag -a $tag -m "Release $tag"
+            git push origin $tag
+          } else {
+            Write-Host "Tag $tag already exists. Skipping."
+          }
+
+      - name: Create GitHub Release for Excel
+        if: ${{ steps.detect.outputs.excelTouched == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: CsvHelper.Excel/v${{ steps.detect.outputs.excelNewVersion }}
+          name: CsvHelper.Excel v${{ steps.detect.outputs.excelNewVersion }}
+          body_path: release-notes-excel.md
+          files: |
+            nupkgs/CsvHelper.Excel.Core.${{ steps.detect.outputs.excelNewVersion }}.nupkg
+
+      - name: Create GitHub Release for FixedLengthParser
+        if: ${{ steps.detect.outputs.fixedTouched == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: CsvHelper.FixedLengthParser/v${{ steps.detect.outputs.fixedNewVersion }}
+          name: CsvHelper.FixedLengthParser v${{ steps.detect.outputs.fixedNewVersion }}
+          body_path: release-notes-fixed.md
+          files: |
+            nupkgs/CsvHelper.FixedLengthParser.${{ steps.detect.outputs.fixedNewVersion }}.nupkg
