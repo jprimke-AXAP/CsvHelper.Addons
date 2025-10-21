@@ -113,3 +113,23 @@ dotnet nuget add source "https://nuget.pkg.github.com/<owner>/index.json" --name
 ```
 
 No additional secrets are required for publishing; the workflow uses GitHub's built-in `GITHUB_TOKEN` for the repository.
+
+## Optional: auto-increase version on each build
+
+This repo uses Nerdbank.GitVersioning (NB.GV) for base semantic versioning (see `version.json`). You can opt-in to a per-build unique version without changing git tags by setting an MSBuild property:
+
+- When enabled, the build appends a UTC timestamp suffix to the base version, producing versions like `1.8.0-ci.20251021.122744`.
+- The suffix is applied to NuGet `PackageVersion` and `AssemblyInformationalVersion`. Assembly file version may remain stable per NB.GV settings.
+
+Enable per-build versioning:
+
+```powershell
+dotnet build CsvHelper.Addons.slnx -c Release -p:AutoBuildVersion=true
+dotnet pack  CsvHelper.Addons.slnx -c Release -p:AutoBuildVersion=true -o .\nupkgs
+```
+
+Tips:
+
+- Omit `AutoBuildVersion=true` for normal release versions from NB.GV.
+- CI: set the environment variable `AutoBuildVersion=true` or pass it as an MSBuild property.
+- Timestamp format: `yyyyMMdd.HHmmss` (UTC) for monotonic, sortable versions.

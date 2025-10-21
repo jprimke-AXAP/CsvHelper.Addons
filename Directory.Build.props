@@ -12,4 +12,22 @@
         <Copyright>© by Joerg Primke</Copyright>
     </PropertyGroup>
 
+    <!--
+      Opt-in per-build unique versioning for packages and informational version.
+      Enable by passing /p:AutoBuildVersion=true (or setting the environment variable AutoBuildVersion=true).
+      This keeps the semver base from the normal versioning (e.g., Nerdbank.GitVersioning)
+      and appends a timestamped "ci" pre-release label so every build gets a unique version.
+    -->
+    <PropertyGroup Condition="'$(AutoBuildVersion)' == 'true'">
+        <_BuildTimestamp>$([System.DateTime]::UtcNow.ToString('yyyyMMdd.HHmmss'))</_BuildTimestamp>
+        <!-- BaseVersion prefers Version (from NB.GV), falls back to VersionPrefix, then 1.0.0 -->
+        <_BaseVersion Condition="'$(Version)' != ''">$(Version)</_BaseVersion>
+        <_BaseVersion Condition="'$(_BaseVersion)' == '' and '$(VersionPrefix)' != ''">$(VersionPrefix)</_BaseVersion>
+        <_BaseVersion Condition="'$(_BaseVersion)' == ''">1.0.0</_BaseVersion>
+        <!-- Always produce a SemVer2 compliant package version: {base}-ci.{yyyyMMdd.HHmmss} -->
+        <PackageVersion>$(_BaseVersion)-ci.$(_BuildTimestamp)</PackageVersion>
+        <!-- Ensure assemblies carry the same informational version -->
+        <InformationalVersion>$(PackageVersion)</InformationalVersion>
+    </PropertyGroup>
+
 </Project>
