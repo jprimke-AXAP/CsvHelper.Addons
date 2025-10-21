@@ -93,12 +93,11 @@ jobs:
           }
 
           function Bump-Patch($semver) {
-            # Accepts x, x.y, or x.y.z; returns x.y.(z+1)
-            $parts = $semver -split '\.'
-            $major = 1; $minor = 0; $patch = 0
-            if ($parts.Count -ge 1 -and $parts[0] -match '^[0-9]+$') { $major = [int]$parts[0] }
-            if ($parts.Count -ge 2 -and $parts[1] -match '^[0-9]+$') { $minor = [int]$parts[1] }
-            if ($parts.Count -ge 3 -and $parts[2] -match '^[0-9]+$') { $patch = [int]$parts[2] }
+            # Accepts x, x.y, or x.y.z; returns x.y.(z+1). Preserves existing components when present.
+            $parts = ($semver -split '\.') | Where-Object { $_ -ne '' }
+            $major = if ($parts.Count -ge 1 -and $parts[0] -match '^[0-9]+$') { [int]$parts[0] } else { 1 }
+            $minor = if ($parts.Count -ge 2 -and $parts[1] -match '^[0-9]+$') { [int]$parts[1] } else { 0 }
+            $patch = if ($parts.Count -ge 3 -and $parts[2] -match '^[0-9]+$') { [int]$parts[2] } else { 0 }
             return "$major.$minor.$($patch + 1)"
           }
 
