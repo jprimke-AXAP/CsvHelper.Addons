@@ -1,6 +1,7 @@
 # CsvHelper.Addons
 
 [![Pack NuGet on version bump](https://github.com/jprimke-AXAP/CsvHelper.Addons/actions/workflows/nuget-pack.yml/badge.svg?branch=main)](https://github.com/jprimke-AXAP/CsvHelper.Addons/actions/workflows/nuget-pack.yml)
+[![Publish packages on change](https://github.com/jprimke-AXAP/CsvHelper.Addons/actions/workflows/publish-packages.yml/badge.svg?branch=main)](https://github.com/jprimke-AXAP/CsvHelper.Addons/actions/workflows/publish-packages.yml)
 [![GitHub Release](https://img.shields.io/github/v/release/jprimke-AXAP/CsvHelper.Addons?display_name=tag)](https://github.com/jprimke-AXAP/CsvHelper.Addons/releases)
 
 Language: English | [Deutsch](README.de.md)
@@ -96,3 +97,19 @@ Tip: You can build/test projects individually, e.g. `dotnet build src/CsvHelper.
 
 - Excel support targets XLSX via ClosedXML. CSV files themselves are out of scope (CsvHelper handles CSV).
 - `FixedLengthParser` uses end-exclusive ranges (e.g., `new Range(0, 10)` covers characters 0 to 9).
+
+## CI packaging and releases
+
+- On pushes to `main` that touch project files (`.csproj`), solution files, or code under `src/`, GitHub Actions builds, tests, and packs changed projects only.
+- Built packages are:
+    - published to GitHub Packages (owner feed at <https://github.com/orgs/${owner}/packages>)
+    - attached to a GitHub Release with a `packages-<run>-<sha>` tag.
+
+Consumption from GitHub Packages requires adding a NuGet source:
+
+```sh
+dotnet nuget add source "https://nuget.pkg.github.com/<owner>/index.json" --name github \
+    --username <owner> --password <PAT with read:packages> --store-password-in-clear-text
+```
+
+No additional secrets are required for publishing; the workflow uses GitHub's built-in `GITHUB_TOKEN` for the repository.
