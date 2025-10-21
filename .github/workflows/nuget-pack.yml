@@ -270,63 +270,65 @@ jobs:
             Get-Content -Raw release-notes-fixed.md | Out-File -Append -FilePath $changelog -Encoding utf8
           }
 
-      - name: Commit version bump + changelog [skip ci]
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          if ('${{ steps.detect.outputs.excelTouched }}' -eq 'true') { git add "src/CsvHelper.Excel/CsvHelper.Excel.csproj" }
-          if ('${{ steps.detect.outputs.fixedTouched }}' -eq 'true') { git add "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj" }
-          if (Test-Path "CHANGELOG.md") { git add CHANGELOG.md }
-          # Only commit/push if there are staged changes
-          $staged = (git diff --cached --name-only) | Where-Object { $_ -ne $null }
-          if ($staged -and $staged.Count -gt 0) {
-            git commit -m "chore: bump package versions and update changelog [skip ci]"
-            git push
-          } else {
-            Write-Host "No changes to commit."
-            exit 0
-          }
+      - name: Create pull request for version bump + changelog
+        if: ${{ steps.detect.outputs.excelTouched == 'true' || steps.detect.outputs.fixedTouched == 'true' }}
+        id: cpr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ci/version-bump-${{ github.run_id }}
+          commit-message: 'chore: bump package versions and update changelog [skip ci]'
+          title: 'chore: bump package versions and update changelog'
+          body: |
+            Automated version bump and changelog update.
+
+            - Excel => ${{ steps.detect.outputs.excelNewVersion }} (touched=${{ steps.detect.outputs.excelTouched }})
+            - FixedLengthParser => ${{ steps.detect.outputs.fixedNewVersion }} (touched=${{ steps.detect.outputs.fixedTouched }})
+          add-paths: |
+            src/CsvHelper.Excel/CsvHelper.Excel.csproj
+            src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj
+            CHANGELOG.md
+          delete-branch: true
 
       - name: Restore
+        if: ${{ steps.cpr.outputs.pull-request-number == '' }}
         shell: pwsh
         run: |
           dotnet restore "src/CsvHelper.Excel/CsvHelper.Excel.csproj"
           dotnet restore "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj"
 
       - name: Build CsvHelper.Excel
-        if: steps.detect.outputs.excelTouched == 'true'
+        if: steps.detect.outputs.excelTouched == 'true' && steps.cpr.outputs.pull-request-number == ''
         shell: pwsh
         run: |
           dotnet build "src/CsvHelper.Excel/CsvHelper.Excel.csproj" --configuration Release --no-restore
 
       - name: Build CsvHelper.FixedLengthParser
-        if: steps.detect.outputs.fixedTouched == 'true'
+        if: steps.detect.outputs.fixedTouched == 'true' && steps.cpr.outputs.pull-request-number == ''
         shell: pwsh
         run: |
           dotnet build "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj" --configuration Release --no-restore
 
       - name: Prepare output directory
+        if: ${{ steps.cpr.outputs.pull-request-number == '' }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path "$env:GITHUB_WORKSPACE/nupkgs" -Force | Out-Null
 
       - name: Pack CsvHelper.Excel
-        if: steps.detect.outputs.excelTouched == 'true'
+        if: steps.detect.outputs.excelTouched == 'true' && steps.cpr.outputs.pull-request-number == ''
         shell: pwsh
         run: |
           dotnet pack "src/CsvHelper.Excel/CsvHelper.Excel.csproj" --configuration Release --no-build -o "$env:GITHUB_WORKSPACE/nupkgs" -p:PackageVersion=${{ steps.detect.outputs.excelNewVersion }} -p:Version=${{ steps.detect.outputs.excelNewVersion }}
 
       - name: Pack CsvHelper.FixedLengthParser
-        if: steps.detect.outputs.fixedTouched == 'true'
+        if: steps.detect.outputs.fixedTouched == 'true' && steps.cpr.outputs.pull-request-number == ''
         shell: pwsh
         run: |
           dotnet pack "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj" --configuration Release --no-build -o "$env:GITHUB_WORKSPACE/nupkgs" -p:PackageVersion=${{ steps.detect.outputs.fixedNewVersion }} -p:Version=${{ steps.detect.outputs.fixedNewVersion }}
 
       - name: List packages
+        if: ${{ steps.cpr.outputs.pull-request-number == '' }}
         shell: pwsh
         run: |
           if (Test-Path "$env:GITHUB_WORKSPACE/nupkgs") {
@@ -334,7 +336,7 @@ jobs:
           }
 
       - name: Upload packages artifact
-        if: ${{ hashFiles('nupkgs/*.nupkg') != '' }}
+        if: ${{ steps.cpr.outputs.pull-request-number == '' && hashFiles('nupkgs/*.nupkg') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: nuget-packages
@@ -343,7 +345,7 @@ jobs:
           retention-days: 30
 
       - name: Publish packages to GitHub Packages
-        if: ${{ hashFiles('nupkgs/*.nupkg') != '' }}
+        if: ${{ steps.cpr.outputs.pull-request-number == '' && hashFiles('nupkgs/*.nupkg') != '' }}
         shell: pwsh
         env:
           GH_OWNER: ${{ github.repository_owner }}
@@ -356,12 +358,13 @@ jobs:
           dotnet nuget push "nupkgs/*.nupkg" --source github --skip-duplicate
 
       - name: Fetch tags
+        if: ${{ steps.cpr.outputs.pull-request-number == '' }}
         shell: pwsh
         run: |
           git fetch --tags --force --prune
 
       - name: Create and push tag for Excel
-        if: ${{ steps.detect.outputs.excelTouched == 'true' }}
+        if: ${{ steps.cpr.outputs.pull-request-number == '' && steps.detect.outputs.excelTouched == 'true' }}
         shell: pwsh
         run: |
           $tag = "CsvHelper.Excel/v${{ steps.detect.outputs.excelNewVersion }}"
@@ -373,7 +376,7 @@ jobs:
           }
 
       - name: Create and push tag for FixedLengthParser
-        if: ${{ steps.detect.outputs.fixedTouched == 'true' }}
+        if: ${{ steps.cpr.outputs.pull-request-number == '' && steps.detect.outputs.fixedTouched == 'true' }}
         shell: pwsh
         run: |
           $tag = "CsvHelper.FixedLengthParser/v${{ steps.detect.outputs.fixedNewVersion }}"
@@ -385,7 +388,7 @@ jobs:
           }
 
       - name: Create GitHub Release for Excel
-        if: ${{ steps.detect.outputs.excelTouched == 'true' }}
+        if: ${{ steps.cpr.outputs.pull-request-number == '' && steps.detect.outputs.excelTouched == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: CsvHelper.Excel/v${{ steps.detect.outputs.excelNewVersion }}
@@ -395,7 +398,7 @@ jobs:
             nupkgs/CsvHelper.Excel.Core.${{ steps.detect.outputs.excelNewVersion }}.nupkg
 
       - name: Create GitHub Release for FixedLengthParser
-        if: ${{ steps.detect.outputs.fixedTouched == 'true' }}
+        if: ${{ steps.cpr.outputs.pull-request-number == '' && steps.detect.outputs.fixedTouched == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: CsvHelper.FixedLengthParser/v${{ steps.detect.outputs.fixedNewVersion }}
