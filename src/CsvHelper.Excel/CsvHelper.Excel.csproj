@@ -2,7 +2,7 @@
   <PropertyGroup>
     <Description>An implementation of ICsvParser and ICsvSerializer from CsvHelper that reads and writes using the ClosedXml library.</Description>
     <AssemblyTitle>CsvHelper for Excel</AssemblyTitle>
-    <VersionPrefix>33.5.0</VersionPrefix>    
+  <VersionPrefix>33.6.0</VersionPrefix>    
     <Authors>Chris Young</Authors>
     <AssemblyName>CsvHelper.Excel</AssemblyName>
     <OutputType>Library</OutputType>
@@ -11,8 +11,8 @@
     <PackageProjectUrl>https://github.com/youngcm2/CsvHelper.Excel</PackageProjectUrl>
     <PackageLicenseUrl>https://github.com/youngcm2/CsvHelper.Excel/blob/master/LICENSE</PackageLicenseUrl>
     <PackageOutputPath>./nupkg</PackageOutputPath>
-    <AssemblyVersion>33.5.25070.0</AssemblyVersion>
-    <FileVersion>33.5.25070.0</FileVersion>
+  <AssemblyVersion>33.6.25070.0</AssemblyVersion>
+  <FileVersion>33.6.25070.0</FileVersion>
 	<Nullable>disable</Nullable>
   </PropertyGroup> 
   
