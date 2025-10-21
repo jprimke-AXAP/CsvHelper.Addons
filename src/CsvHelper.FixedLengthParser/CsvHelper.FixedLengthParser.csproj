@@ -1,8 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-  <AssemblyVersion>1.6.25133.0</AssemblyVersion>
-  <FileVersion>1.6.25133.0</FileVersion>
+  <AssemblyVersion>1.8.25133.0</AssemblyVersion>
+  <FileVersion>1.8.25133.0</FileVersion>
         <Platforms>AnyCPU</Platforms>
     </PropertyGroup>
 
