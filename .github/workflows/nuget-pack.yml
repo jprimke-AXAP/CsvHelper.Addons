@@ -204,11 +204,25 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $excelPath = "src/CsvHelper.Excel/CsvHelper.Excel.csproj"
-          $excelXml = [xml](Get-Content $excelPath -Raw)
-          $pg = $excelXml.Project.PropertyGroup | Select-Object -First 1
-          if (-not $pg) { $pg = $excelXml.CreateElement('PropertyGroup'); [void]$excelXml.Project.AppendChild($pg) }
-          $verNode = $pg.VersionPrefix; if (-not $verNode) { $verNode = $pg.Version }
-          if (-not $verNode) { $verNode = $excelXml.CreateElement('VersionPrefix'); [void]$pg.AppendChild($verNode) }
+          $excelXml = New-Object System.Xml.XmlDocument
+          $excelXml.PreserveWhitespace = $true
+          $excelXml.Load($excelPath)
+
+          # Ensure we have a PropertyGroup to work with
+          $pg = $excelXml.SelectSingleNode('//Project/PropertyGroup')
+          if (-not $pg) {
+            $pg = $excelXml.CreateElement('PropertyGroup')
+            [void]$excelXml.DocumentElement.AppendChild($pg)
+          }
+
+          # Prefer VersionPrefix, fall back to Version
+          $verNode = $excelXml.SelectSingleNode('//Project/PropertyGroup/VersionPrefix')
+          if (-not $verNode) { $verNode = $excelXml.SelectSingleNode('//Project/PropertyGroup/Version') }
+          if (-not $verNode) {
+            $verNode = $excelXml.CreateElement('VersionPrefix')
+            [void]$pg.AppendChild($verNode)
+          }
+
           $verNode.InnerText = "${{ steps.detect.outputs.excelNewVersion }}"
           $excelXml.Save($excelPath)
 
@@ -218,11 +232,24 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $fixedPath = "src/CsvHelper.FixedLengthParser/CsvHelper.FixedLengthParser.csproj"
-          $fixedXml = [xml](Get-Content $fixedPath -Raw)
-          $pg2 = $fixedXml.Project.PropertyGroup | Select-Object -First 1
-          if (-not $pg2) { $pg2 = $fixedXml.CreateElement('PropertyGroup'); [void]$fixedXml.Project.AppendChild($pg2) }
-          $fixedVerNode = $pg2.Version
-          if (-not $fixedVerNode) { $fixedVerNode = $fixedXml.CreateElement('Version'); [void]$pg2.AppendChild($fixedVerNode) }
+          $fixedXml = New-Object System.Xml.XmlDocument
+          $fixedXml.PreserveWhitespace = $true
+          $fixedXml.Load($fixedPath)
+
+          # Ensure we have a PropertyGroup to work with
+          $pg2 = $fixedXml.SelectSingleNode('//Project/PropertyGroup')
+          if (-not $pg2) {
+            $pg2 = $fixedXml.CreateElement('PropertyGroup')
+            [void]$fixedXml.DocumentElement.AppendChild($pg2)
+          }
+
+          # Ensure Version element exists
+          $fixedVerNode = $fixedXml.SelectSingleNode('//Project/PropertyGroup/Version')
+          if (-not $fixedVerNode) {
+            $fixedVerNode = $fixedXml.CreateElement('Version')
+            [void]$pg2.AppendChild($fixedVerNode)
+          }
+
           $fixedVerNode.InnerText = "${{ steps.detect.outputs.fixedNewVersion }}"
           $fixedXml.Save($fixedPath)
 
