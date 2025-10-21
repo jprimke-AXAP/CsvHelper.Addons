@@ -1,0 +1,15 @@
+<Project>
+  <!-- Apply a unique CI version just-in-time so it overrides NB.GV -->
+  <Target Name="ApplyAutoBuildVersion"
+          Condition="'$(AutoBuildVersion)' == 'true'"
+          BeforeTargets="GenerateAssemblyInfo;GetPackageVersion">
+    <PropertyGroup>
+      <!-- Ensure all version surfaces use the CI version computed in Directory.Build.props -->
+      <Version>$(CiVersion)</Version>
+      <VersionSuffix>ci.$(BuildTimestamp)</VersionSuffix>
+      <PackageVersion>$(CiVersion)</PackageVersion>
+      <InformationalVersion>$(CiVersion)</InformationalVersion>
+      <AssemblyInformationalVersion>$(CiVersion)</AssemblyInformationalVersion>
+    </PropertyGroup>
+  </Target>
+</Project>

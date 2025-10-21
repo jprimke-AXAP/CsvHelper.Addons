@@ -12,4 +12,10 @@
         <Copyright>© by Joerg Primke</Copyright>
     </PropertyGroup>
 
+    <!--
+      Opt-in per-build unique versioning for packages and informational version.
+      Enable by passing /p:AutoBuildVersion=true (or setting the environment variable AutoBuildVersion=true).
+      This keeps the semver base from the normal versioning (e.g., Nerdbank.GitVersioning)
+      and appends a timestamped "ci" pre-release label so every build gets a unique version.
+    -->
 </Project>
