@@ -84,6 +84,7 @@ Alternativ können Sie Attribute an Ihrem Datentyp verwenden. Siehe `src/CsvHelp
 - Build: `dotnet build`
 - Tests: `dotnet test`
 
+**Tipp:** Sie können Projekte auch einzeln bauen oder testen, z. B. mit `dotnet build src/ProjectName`.
 ## Projekte im Überblick
 
 - CsvHelper.Excel: `ExcelParser` (IParser) und `ExcelWriter` (CsvWriter) zum Lesen/Schreiben von Excel-Dateien.
