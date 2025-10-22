@@ -1,7 +1,6 @@
 # CsvHelper.Addons
 
-[![Pack NuGet on version bump](https://github.com/jprimke-AXAP/CsvHelper.Addons/actions/workflows/nuget-pack.yml/badge.svg?branch=main)](https://github.com/jprimke-AXAP/CsvHelper.Addons/actions/workflows/nuget-pack.yml)
-[![Publish packages on change](https://github.com/jprimke-AXAP/CsvHelper.Addons/actions/workflows/publish-packages.yml/badge.svg?branch=main)](https://github.com/jprimke-AXAP/CsvHelper.Addons/actions/workflows/publish-packages.yml)
+[![Build and publish packages](https://github.com/jprimke-AXAP/CsvHelper.Addons/actions/workflows/publish-packages.yml/badge.svg?branch=main)](https://github.com/jprimke-AXAP/CsvHelper.Addons/actions/workflows/publish-packages.yml)
 [![GitHub Release](https://img.shields.io/github/v/release/jprimke-AXAP/CsvHelper.Addons?display_name=tag)](https://github.com/jprimke-AXAP/CsvHelper.Addons/releases)
 
 Language: English | [Deutsch](README.de.md)
