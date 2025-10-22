@@ -12,5 +12,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/CsvHelper.Excel.Specs/CsvHelper.Excel.Specs.csproj" />
+    <Project Path="tests/CsvHelper.FixedLengthParser.Specs/CsvHelper.FixedLengthParser.Specs.csproj" />
   </Folder>
 </Solution>
